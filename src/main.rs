@@ -69,7 +69,7 @@ fn main() -> color_eyre::Result<()> {
 fn open_port(path: &str, baud_rate: u32) -> color_eyre::Result<BufReader<Box<dyn SerialPort>>> {
     Ok(BufReader::with_capacity(
         1024 * 1024,
-        serialport::new(path, 9600).timeout(Duration::MAX).open()?,
+        serialport::new(path, baud_rate).timeout(Duration::MAX).open()?,
     ))
 }
 
