@@ -1,6 +1,8 @@
 use std::{
     io::{self, BufReader, BufWriter, ErrorKind, stdout},
     path::{Path, PathBuf},
+    process::exit,
+    sync::atomic::{AtomicBool, Ordering},
     time::Duration,
 };
 
@@ -8,11 +10,13 @@ use clap::Parser;
 use color_eyre::eyre::eyre;
 use dialoguer::{
     Select,
-    console::{Color, Style},
+    console::{Color, Style, Term},
     theme::ColorfulTheme,
 };
 use notify::{Config, EventKind, PollWatcher, RecursiveMode, Watcher};
 use serialport::SerialPort;
+
+static DIALOGUING: AtomicBool = AtomicBool::new(false);
 
 #[derive(Parser)]
 struct Args {
@@ -21,7 +25,16 @@ struct Args {
 
 fn main() -> color_eyre::Result<()> {
     color_eyre::install().unwrap();
+
+    let _ = ctrlc::set_handler(move || {
+        if !DIALOGUING.load(Ordering::Relaxed) {
+            println!();
+            exit(130);
+        }
+    });
+
     let args = Args::parse();
+
     let selected_port = match args.path {
         Some(path) => path.to_string_lossy().into_owned(),
         None => {
@@ -29,19 +42,53 @@ fn main() -> color_eyre::Result<()> {
 
             let port_names = ports
                 .iter()
-                .map(|p| p.port_name.as_str())
+                .map(|p| {
+                    let port_name = p.port_name.as_str();
+                    let usb_data = match &p.port_type {
+                        serialport::SerialPortType::UsbPort(usb_port_info) => {
+                            match (
+                                usb_port_info.product.as_deref(),
+                                usb_port_info.manufacturer.as_deref(),
+                            ) {
+                                (None, None) => "".to_string(),
+                                (None, Some(manufacturer)) => format!(" - {manufacturer}"),
+                                (Some(product), None) => format!(" - {product}"),
+                                (Some(product), Some(manufacturer)) => {
+                                    format!(" - {product} {manufacturer}")
+                                }
+                            }
+                        }
+                        serialport::SerialPortType::PciPort => "".into(),
+                        serialport::SerialPortType::BluetoothPort => "".into(),
+                        serialport::SerialPortType::Unknown => "".into(),
+                    };
+
+                    format!("{port_name}{}", usb_data)
+                })
                 .collect::<Vec<_>>();
 
-            let mut theme = ColorfulTheme::default();
-            theme.active_item_style = Style::new().fg(Color::Color256(202));
+            let theme = ColorfulTheme {
+                active_item_style: Style::new().fg(Color::Color256(202)),
+                ..Default::default()
+            };
 
-            let selection = Select::with_theme(&theme)
+            DIALOGUING.store(true, Ordering::Relaxed);
+            match Select::with_theme(&theme)
                 .with_prompt("Pick your serial port")
                 .default(0)
                 .items(&port_names)
-                .interact()?;
-
-            ports[selection].port_name.clone()
+                .interact()
+            {
+                Ok(selection) => {
+                    DIALOGUING.store(false, Ordering::Relaxed);
+                    ports[selection].port_name.clone()
+                }
+                Err(_) => {
+                    DIALOGUING.store(false, Ordering::Relaxed);
+                    Term::stderr().show_cursor().ok();
+                    return Ok(());
+                }
+            }
         }
     };
 
@@ -69,7 +116,9 @@ fn main() -> color_eyre::Result<()> {
 fn open_port(path: &str, baud_rate: u32) -> color_eyre::Result<BufReader<Box<dyn SerialPort>>> {
     Ok(BufReader::with_capacity(
         1024 * 1024,
-        serialport::new(path, baud_rate).timeout(Duration::MAX).open()?,
+        serialport::new(path, baud_rate)
+            .timeout(Duration::MAX)
+            .open()?,
     ))
 }
 
