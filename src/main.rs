@@ -1,5 +1,5 @@
 use std::{
-    io::{self, BufReader, BufWriter, ErrorKind, stdout},
+    io::{self, BufReader, ErrorKind, stdout},
     path::{Path, PathBuf},
     process::exit,
     sync::atomic::{AtomicBool, Ordering},
@@ -28,7 +28,6 @@ fn main() -> color_eyre::Result<()> {
 
     let _ = ctrlc::set_handler(move || {
         if !DIALOGUING.load(Ordering::Relaxed) {
-            println!();
             exit(130);
         }
     });
@@ -92,7 +91,8 @@ fn main() -> color_eyre::Result<()> {
         }
     };
 
-    let mut stdout = BufWriter::with_capacity(1024 * 1024, stdout().lock());
+    eprintln!("[picocom] Connecting...");
+    let mut stdout = stdout().lock();
     let mut port = open_port(&selected_port, 9600)?;
     eprintln!("[picocom] Connected to {}", selected_port);
 
@@ -101,18 +101,19 @@ fn main() -> color_eyre::Result<()> {
             Ok(_) => {}
             Err(err) if err.kind() == ErrorKind::TimedOut => {}
             Err(err)
-                if err.kind() == ErrorKind::NotFound || err.kind() == ErrorKind::BrokenPipe =>
+                if err.kind() == ErrorKind::NotFound || err.kind() == ErrorKind::BrokenPipe || err.kind() == ErrorKind::AddrNotAvailable =>
             {
-                eprintln!("[picocom] Lost connection to {}: {err}", selected_port,);
+                eprintln!("[picocom] Lost connection to {}: {err}", selected_port);
                 wait_for_creation(&selected_port)?;
-                eprintln!("[picocom] Reconnected to {}", selected_port);
                 port = open_port(&selected_port, 9600)?;
+                eprintln!("[picocom] Reconnected to {}", selected_port);
             }
             Err(err) => return Err(err.into()),
         };
     }
 }
 
+#[track_caller]
 fn open_port(path: &str, baud_rate: u32) -> color_eyre::Result<BufReader<Box<dyn SerialPort>>> {
     Ok(BufReader::with_capacity(
         1024 * 1024,
