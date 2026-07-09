@@ -21,6 +21,8 @@ static DIALOGUING: AtomicBool = AtomicBool::new(false);
 #[derive(Parser)]
 struct Args {
     path: Option<PathBuf>,
+    #[arg(long, short, default_value = "115200")]
+    baud: u32,
 }
 
 fn main() -> color_eyre::Result<()> {
@@ -93,7 +95,7 @@ fn main() -> color_eyre::Result<()> {
 
     eprintln!("[picocom] Connecting...");
     let mut stdout = stdout().lock();
-    let mut port = open_port(&selected_port, 9600)?;
+    let mut port = open_port(&selected_port, args.baud)?;
     eprintln!("[picocom] Connected to {}", selected_port);
 
     loop {
@@ -105,7 +107,7 @@ fn main() -> color_eyre::Result<()> {
             {
                 eprintln!("[picocom] Lost connection to {}: {err}", selected_port);
                 wait_for_creation(&selected_port)?;
-                port = open_port(&selected_port, 9600)?;
+                port = open_port(&selected_port, args.baud)?;
                 eprintln!("[picocom] Reconnected to {}", selected_port);
             }
             Err(err) => return Err(err.into()),
